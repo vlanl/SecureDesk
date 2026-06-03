@@ -355,6 +355,7 @@ def build_flutter_deb(version, features):
     system2('mkdir -p tmpdeb/DEBIAN')
     generate_control_file(version)
     system2('cp -a ../res/DEBIAN/* tmpdeb/DEBIAN/')
+    system2('chmod a+x tmpdeb/DEBIAN/preinst tmpdeb/DEBIAN/postinst tmpdeb/DEBIAN/postrm tmpdeb/DEBIAN/prerm')
     md5_file_folder("tmpdeb/")
     system2('dpkg-deb -b tmpdeb rustdesk.deb;')
 
@@ -392,6 +393,7 @@ def build_deb_from_folder(version, binary_folder):
     system2('mkdir -p tmpdeb/DEBIAN')
     generate_control_file(version)
     system2('cp -a ../res/DEBIAN/* tmpdeb/DEBIAN/')
+    system2('chmod a+x tmpdeb/DEBIAN/preinst tmpdeb/DEBIAN/postinst tmpdeb/DEBIAN/postrm tmpdeb/DEBIAN/prerm')
     md5_file_folder("tmpdeb/")
     system2('dpkg-deb -b tmpdeb rustdesk.deb;')
 
@@ -620,6 +622,7 @@ def main():
                 os.system('mkdir -p tmpdeb/etc/X11/rustdesk/')
                 os.system('cp res/xorg.conf tmpdeb/etc/X11/rustdesk/')
                 os.system('cp -a DEBIAN/* tmpdeb/DEBIAN/')
+                os.system('chmod a+x tmpdeb/DEBIAN/preinst tmpdeb/DEBIAN/postinst tmpdeb/DEBIAN/postrm tmpdeb/DEBIAN/prerm')
                 os.system('mkdir -p tmpdeb/etc/pam.d/')
                 os.system('cp pam.d/rustdesk.debian tmpdeb/etc/pam.d/rustdesk')
                 system2('strip tmpdeb/usr/bin/rustdesk')
