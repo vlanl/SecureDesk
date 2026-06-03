@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">SecureDesk</string>
+    <string name="accessibility_service_description">Allow other devices to control your phone using virtual touch, when SecureDesk screen sharing is established</string>
+</resources>
