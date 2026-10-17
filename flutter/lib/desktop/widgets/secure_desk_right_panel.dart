@@ -437,7 +437,7 @@ class _LandscapePainter extends CustomPainter {
 
     // Version label — right-aligned below "Secure Remote Desktop" title
     final verTp = TextPainter(
-      text: TextSpan(text:'V1.4.8', style: TextStyle(
+      text: TextSpan(text:'V1.5.0', style: TextStyle(
         fontSize: 10, fontWeight: FontWeight.w600,
         color: Colors.white.withOpacity(isDark ? 0.50 : 0.65),
         letterSpacing: 0.5,
