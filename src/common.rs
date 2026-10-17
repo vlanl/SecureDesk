@@ -3194,13 +3194,13 @@ mod tests {
         assert!(is_public("https://vlanl.com/"));
         assert!(is_public("https://www.vlanl.com/"));
         assert!(is_public("https://api.vlanl.com/v1"));
-        assert!(is_public("https://API.RUSTDESK.COM/v1"));
+        assert!(is_public("https://API.VLANL.COM/v1"));
         assert!(is_public("https://vlanl.com/path"));
 
         // Test URLs ending with "vlanl.com"
         assert!(is_public("vlanl.com"));
         assert!(is_public("https://vlanl.com"));
-        assert!(is_public("https://RustDesk.com"));
+        assert!(is_public("https://Vlanl.com"));
         assert!(is_public("http://www.vlanl.com"));
         assert!(is_public("https://api.vlanl.com"));
 

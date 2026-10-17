@@ -152,7 +152,7 @@ class _DesktopHomePageState extends State<DesktopHomePage>
                 ),
               ),
             ),
-            // Fixed bottom area — help cards, plugin entry, status bar
+            // Fixed bottom area — help cards and status bar
             // are outside the scrollable area so they sit flush at the bottom.
             Obx(() {
               if (isIncomingOnly && isInHomePage()) {
@@ -162,7 +162,6 @@ class _DesktopHomePageState extends State<DesktopHomePage>
               }
               return buildHelpCards(stateGlobal.updateUrl.value);
             }),
-            buildPluginEntry(),
             if (!isOutgoingOnly)
               buildStatusBar(context),
             if (isOutgoingOnly)
