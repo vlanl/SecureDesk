@@ -1044,6 +1044,9 @@ pub fn main_set_option(key: String, value: String) {
     // If `is_allow_tls_fallback` and https proxy is used, we need to restart rendezvous mediator.
     // No need to check if https proxy is used, because this option does not change frequently
     // and restarting mediator is safe even https proxy is not used.
+    // SecureDesk: 在 key 被 move 进 set_option() 之前先判断是否 hide-tray
+    #[cfg(windows)]
+    let is_hide_tray = key.eq(keys::OPTION_HIDE_TRAY);
     let is_allow_tls_fallback = key.eq(keys::OPTION_ALLOW_INSECURE_TLS_FALLBACK);
     if is_allow_tls_fallback
         || key.eq("custom-rendezvous-server")
@@ -1061,6 +1064,14 @@ pub fn main_set_option(key: String, value: String) {
         crate::common::test_rendezvous_server();
     } else {
         set_option(key, value.clone());
+    }
+    // SecureDesk: hide-tray 变化时通知托盘进程动态显示/隐藏图标
+    #[cfg(windows)]
+    if is_hide_tray {
+        let hide = value == "Y";
+        std::thread::spawn(move || {
+            crate::ui_interface::send_to_tray(hide);
+        });
     }
 }
 
@@ -2729,22 +2740,19 @@ pub fn main_get_common(key: String) -> String {
             }
         } else if key.starts_with("download-file-") {
             let _version = key.replace("download-file-", "");
+            // SecureDesk: 文件名前缀跟随 APP_NAME，而不是硬编码 rustdesk
+            let app_name = crate::common::get_app_name().to_lowercase();
             #[cfg(target_os = "windows")]
-            return match (
-                crate::platform::windows::is_msi_installed(),
-                crate::common::is_custom_client(),
-            ) {
-                (Ok(true), false) => match crate::platform::windows::release_arch_suffix() {
-                    Some(arch) => format!("rustdesk-{_version}-{arch}.msi"),
+            return match crate::platform::windows::is_msi_installed() {
+                Ok(true) => match crate::platform::windows::release_arch_suffix() {
+                    Some(arch) => format!("{app_name}-{_version}-{arch}.msi"),
                     None => "error:unsupported".to_owned(),
                 },
-                (Ok(true), true) | (Ok(false), _) => {
-                    match crate::platform::windows::release_arch_suffix() {
-                        Some(arch) => format!("rustdesk-{_version}-{arch}.exe"),
-                        None => "error:unsupported".to_owned(),
-                    }
-                }
-                (Err(e), _) => {
+                Ok(false) => match crate::platform::windows::release_arch_suffix() {
+                    Some(arch) => format!("{app_name}-{_version}-{arch}.exe"),
+                    None => "error:unsupported".to_owned(),
+                },
+                Err(e) => {
                     log::error!("Failed to check if is msi: {}", e);
                     format!("error:update-failed-check-msi-tip")
                 }
@@ -2752,14 +2760,23 @@ pub fn main_get_common(key: String) -> String {
             #[cfg(target_os = "macos")]
             {
                 return if cfg!(target_arch = "x86_64") {
-                    format!("rustdesk-{_version}-x86_64.dmg")
+                    format!("{app_name}-{_version}-x86_64.dmg")
                 } else if cfg!(target_arch = "aarch64") {
-                    format!("rustdesk-{_version}-aarch64.dmg")
+                    format!("{app_name}-{_version}-aarch64.dmg")
                 } else {
                     "error:unsupported".to_owned()
                 };
             }
-            #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+            #[cfg(target_os = "android")]
+            {
+                let arch = crate::common::get_android_arch();
+                return format!("{app_name}-{_version}-{arch}.apk");
+            }
+            #[cfg(not(any(
+                target_os = "windows",
+                target_os = "macos",
+                target_os = "android"
+            )))]
             {
                 "error:unsupported".to_owned()
             }

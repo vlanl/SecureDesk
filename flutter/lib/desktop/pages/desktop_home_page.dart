@@ -24,6 +24,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:window_size/window_size.dart' as window_size;
 import '../widgets/button.dart';
+import '../widgets/secure_desk_right_panel.dart';
 
 class DesktopHomePage extends StatefulWidget {
   const DesktopHomePage({Key? key}) : super(key: key);
@@ -34,9 +35,17 @@ class DesktopHomePage extends StatefulWidget {
 
 const borderColor = Color(0xFF2F65BA);
 
+// SecureDesk blue theme colors
+const Color _sdBluePrimary = Color(0xFF2C8CFF);
+const Color _sdBlueLight = Color(0xFF42A5F5);
+const Color _sdBlueBorder = Color(0xFF64B5F6);
+
 class _DesktopHomePageState extends State<DesktopHomePage>
     with AutomaticKeepAliveClientMixin, WidgetsBindingObserver {
   final _leftPaneScrollController = ScrollController();
+  final _remoteIdController = TextEditingController();
+  final _remoteIdFocusNode = FocusNode();
+  final RxBool _remoteIdFocused = false.obs;
 
   @override
   bool get wantKeepAlive => true;
@@ -48,6 +57,8 @@ class _DesktopHomePageState extends State<DesktopHomePage>
   var watchIsInputMonitoring = false;
   var watchIsCanRecordAudio = false;
   Timer? _updateTimer;
+  Timer? _statusTimer;
+  final _localSvcStatus = SvcStatus.notReady.obs;
   bool isCardClosed = false;
 
   final RxBool _editHover = false.obs;
@@ -78,6 +89,8 @@ class _DesktopHomePageState extends State<DesktopHomePage>
   Widget buildLeftPane(BuildContext context) {
     final isIncomingOnly = bind.isIncomingOnly();
     final isOutgoingOnly = bind.isOutgoingOnly();
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final dividerColor = isDark ? const Color(0xFF3A3A3A) : const Color(0xFFE0E0E0);
     final children = <Widget>[
       if (!isOutgoingOnly) buildPresetPasswordWarning(),
       if (bind.isCustomClient())
@@ -89,27 +102,16 @@ class _DesktopHomePageState extends State<DesktopHomePage>
         alignment: Alignment.center,
         child: loadLogo(),
       ),
-      buildTip(context),
-      if (!isOutgoingOnly) buildIDBoard(context),
-      if (!isOutgoingOnly) buildPasswordBoard(context),
-      FutureBuilder<Widget>(
-        future: Future.value(
-            Obx(() => buildHelpCards(stateGlobal.updateUrl.value))),
-        builder: (_, data) {
-          if (data.hasData) {
-            if (isIncomingOnly) {
-              if (isInHomePage()) {
-                Future.delayed(Duration(milliseconds: 300), () {
-                  _updateWindowSize();
-                });
-              }
-            }
-            return data.data!;
-          } else {
-            return const Offstage();
-          }
-        },
-      ),
+      if (!isOutgoingOnly) ...[
+        buildDesktopHeader(context),
+        buildIDCard(context, gFFI.serverModel),
+        buildPasswordCard(context, gFFI.serverModel),
+        Divider(height: 1, indent: 16, endIndent: 16, color: dividerColor),
+        const SizedBox(height: 8),
+        buildRemoteControlSection(context),
+        buildButtonGrid(context),
+        const SizedBox(height: 12),
+      ],
     ];
     if (isIncomingOnly) {
       children.addAll([
@@ -129,26 +131,43 @@ class _DesktopHomePageState extends State<DesktopHomePage>
     return ChangeNotifierProvider.value(
       value: gFFI.serverModel,
       child: Container(
-        width: isIncomingOnly ? 280.0 : 200.0,
-        color: Theme.of(context).colorScheme.background,
-        child: Stack(
+        width: isIncomingOnly ? 280.0 : 260.0,
+        color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+        child: Column(
           children: [
-            Column(
-              children: [
-                SingleChildScrollView(
-                  controller: _leftPaneScrollController,
-                  child: Column(
-                    key: _childKey,
-                    children: children,
+            Expanded(
+              child: Material(
+                color: Colors.transparent,
+                type: MaterialType.canvas,
+                child: ScrollConfiguration(
+                  behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
+                  child: SingleChildScrollView(
+                    controller: _leftPaneScrollController,
+                    child: Column(
+                      key: _childKey,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: children,
+                    ),
                   ),
                 ),
-                Expanded(child: Container())
-              ],
+              ),
             ),
+            // Fixed bottom area — help cards, plugin entry, status bar
+            // are outside the scrollable area so they sit flush at the bottom.
+            Obx(() {
+              if (isIncomingOnly && isInHomePage()) {
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  _updateWindowSize();
+                });
+              }
+              return buildHelpCards(stateGlobal.updateUrl.value);
+            }),
+            buildPluginEntry(),
+            if (!isOutgoingOnly)
+              buildStatusBar(context),
             if (isOutgoingOnly)
-              Positioned(
-                bottom: 6,
-                left: 12,
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6, left: 12),
                 child: Align(
                   alignment: Alignment.centerLeft,
                   child: InkWell(
@@ -171,7 +190,7 @@ class _DesktopHomePageState extends State<DesktopHomePage>
                     onHover: (value) => _editHover.value = value,
                   ),
                 ),
-              )
+              ),
           ],
         ),
       ),
@@ -179,9 +198,10 @@ class _DesktopHomePageState extends State<DesktopHomePage>
   }
 
   buildRightPane(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
-      color: Theme.of(context).scaffoldBackgroundColor,
-      child: ConnectionPage(),
+      color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+      child: const SecureDeskRightPanel(),
     );
   }
 
@@ -386,6 +406,416 @@ class _DesktopHomePageState extends State<DesktopHomePage>
     );
   }
 
+  // --- Left pane: "你的桌面" header ---
+  Widget buildDesktopHeader(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            translate("Your Desktop"),
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: Theme.of(context).textTheme.titleLarge?.color,
+            ),
+          ),
+          const SizedBox(height: 0),
+          Text(
+            translate("desk_tip"),
+            style: TextStyle(
+              fontSize: 10,
+              color: Theme.of(context).textTheme.titleLarge?.color?.withOpacity(0.55),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // --- Left pane: ID Card ---
+  Widget buildIDCard(BuildContext context, ServerModel model) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 4, 16, 2),
+      height: 50,
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1A2A4A) : const Color(0xFFDBEAFE),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  translate("ID"),
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: isDark ? Colors.white54 : Colors.black54,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                ListenableBuilder(
+                  listenable: model.serverId,
+                  builder: (context, _) => Text(
+                    model.serverId.text.isEmpty ? "-" : model.serverId.text,
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: MyTheme.accent,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          SizedBox(
+            width: 20,
+            height: 20,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(4),
+              onTap: () {
+                Clipboard.setData(
+                    ClipboardData(text: model.serverId.text));
+                showToast(translate("Copied"));
+              },
+              child: Icon(Icons.copy, size: 12,
+                  color: isDark ? Colors.white38 : Colors.black38),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // --- Left pane: Password Card ---
+  Widget buildPasswordCard(BuildContext context, ServerModel model) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final showOneTime = model.approveMode != 'click' &&
+        model.verificationMethod != kUsePermanentPassword;
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 2, 16, 4),
+      height: 50,
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1A2A4A) : const Color(0xFFDBEAFE),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  translate("One-time Password"),
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: isDark ? Colors.white54 : Colors.black54,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                ListenableBuilder(
+                  listenable: model.serverPasswd,
+                  builder: (context, _) => Text(
+                    model.serverPasswd.text.isEmpty ? "-" : model.serverPasswd.text,
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: isDark ? Colors.white : Colors.black87,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (showOneTime)
+            AnimatedRotationWidget(
+              onPressed: () => bind.mainUpdateTemporaryPassword(),
+              child: Tooltip(
+                message: translate('Refresh Password'),
+                child: Icon(Icons.refresh, size: 12,
+                    color: isDark ? Colors.white38 : Colors.black38),
+              ),
+            ).marginOnly(right: 2),
+          if (!bind.isDisableSettings())
+            InkWell(
+              borderRadius: BorderRadius.circular(4),
+              onTap: () => DesktopSettingPage.switch2page(SettingsTabKey.safety),
+              child: Tooltip(
+                message: translate('Change Password'),
+                child: Icon(Icons.edit, size: 12,
+                    color: isDark ? Colors.white38 : Colors.black38),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  // --- Left pane: "控制远程桌面" section ---
+  Widget buildRemoteControlSection(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textColor = Theme.of(context).textTheme.titleLarge?.color;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 2),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            translate('Control Remote Desktop'),
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: textColor,
+            ),
+          ),
+          const SizedBox(height: 4),
+          // Remote ID input field
+          Obx(() => Container(
+            decoration: BoxDecoration(
+              color: Theme.of(context).brightness == Brightness.dark
+                  ? const Color(0xFF2A2A2A)
+                  : Colors.white,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: _remoteIdFocused.value
+                    ? MyTheme.accent
+                    : (isDark ? const Color(0xFF3A3A3A) : const Color(0xFFDDDDDD)),
+              ),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _remoteIdController,
+                    focusNode: _remoteIdFocusNode,
+                    style: const TextStyle(fontSize: 13),
+                    // Prevent auto-scroll when focus returns after closing sub-windows,
+                    // which causes the left panel content to flicker up and down.
+                    scrollPadding: EdgeInsets.zero,
+                    decoration: InputDecoration(
+                      hintText: translate('Enter Remote ID'),
+                      hintStyle: TextStyle(
+                        color: textColor?.withOpacity(0.35),
+                        fontSize: 12,
+                      ),
+                      border: InputBorder.none,
+                      contentPadding:
+                          const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    ),
+                    onSubmitted: (_) => _onConnect(),
+                  ),
+                ),
+                const SizedBox.shrink(),
+              ],
+            ),
+          )),
+        ],
+      ),
+    );
+  }
+
+  // --- Left pane: 2x2 Button Grid ---
+  Widget buildButtonGrid(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 2, 16, 4),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: _buildActionButton(
+                  context,
+                  icon: Icons.folder_open_outlined,
+                  label: translate('Transfer file'),
+                  isPrimary: false,
+                  onTap: () => _onConnect(isFileTransfer: true),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _buildActionButton(
+                  context,
+                  icon: Icons.videocam_outlined,
+                  label: translate('View camera'),
+                  isPrimary: false,
+                  onTap: () => _onConnect(isViewCamera: true),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              Expanded(
+                child: _buildActionButton(
+                  context,
+                  icon: Icons.link,
+                  label: translate('Connect'),
+                  isPrimary: true,
+                  onTap: () => _onConnect(),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _buildActionButton(
+                  context,
+                  icon: Icons.terminal,
+                  label: '${translate('Terminal')} (Beta)',
+                  isPrimary: true,
+                  onTap: () => _onConnect(isTerminal: true),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildActionButton(
+    BuildContext context, {
+    required IconData icon,
+    required String label,
+    required bool isPrimary,
+    required VoidCallback onTap,
+  }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        decoration: BoxDecoration(
+          color: isPrimary
+              ? MyTheme.accent
+              : (isDark ? const Color(0xFF2A2A2A) : Colors.white),
+          borderRadius: BorderRadius.circular(8),
+          border: isPrimary
+              ? null
+              : Border.all(color: isDark ? const Color(0xFF3A3A3A) : const Color(0xFFDDDDDD)),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              icon,
+              size: 16,
+              color: isPrimary ? Colors.white : MyTheme.accent,
+            ),
+            const SizedBox(width: 6),
+            Flexible(
+              child: Text(
+                label,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                  color: isPrimary ? Colors.white : MyTheme.accent,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget buildStatusBar(BuildContext context) {
+    final textColor = Theme.of(context).textTheme.titleLarge?.color;
+
+    return Obx(() {
+      final statusMsg = _getStatusMessage();
+      final dotColor = svcStopped.value ||
+              _localSvcStatus.value == SvcStatus.connecting
+          ? kColorWarn
+          : (_localSvcStatus.value == SvcStatus.ready
+              ? const Color(0xFF32BEA6)
+              : const Color(0xFFE04F5F));
+
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        decoration: BoxDecoration(
+          color: Theme.of(context).brightness == Brightness.dark
+              ? const Color(0xFF1E1E1E)
+              : Colors.white,
+          border: Border(
+            top: BorderSide(
+              color: textColor?.withOpacity(0.08) ?? const Color(0xFFDDDDDD),
+            ),
+          ),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 8,
+              height: 8,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: dotColor,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                statusMsg,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: textColor?.withOpacity(0.65),
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            Icon(Icons.lock_outline, size: 14,
+                color: textColor?.withOpacity(0.4)),
+          ],
+        ),
+      );
+    });
+  }
+
+  String _getStatusMessage() {
+    if (svcStopped.value) {
+      return translate("Service is not running");
+    }
+    switch (_localSvcStatus.value) {
+      case SvcStatus.connecting:
+        return translate("connecting_status");
+      case SvcStatus.ready:
+        return translate("Ready");
+      case SvcStatus.notReady:
+        return translate("not_ready_status");
+    }
+  }
+
+  // --- Connection logic ---
+  void _onConnect({
+    bool isFileTransfer = false,
+    bool isViewCamera = false,
+    bool isTerminal = false,
+  }) {
+    final id = _remoteIdController.text.trim();
+    if (id.isEmpty) return;
+    connect(context, id,
+        isFileTransfer: isFileTransfer,
+        isViewCamera: isViewCamera,
+        isTerminal: isTerminal);
+  }
+
   buildTip(BuildContext context) {
     final isOutgoingOnly = bind.isOutgoingOnly();
     return Padding(
@@ -428,15 +858,24 @@ class _DesktopHomePageState extends State<DesktopHomePage>
   }
 
   Widget buildHelpCards(String updateUrl) {
-    if (!bind.isCustomClient() &&
-        updateUrl.isNotEmpty &&
-        !isCardClosed &&
-        bind.mainUriPrefixSync().contains('rustdesk')) {
+    // SecureDesk: 允许自定义客户端显示更新卡片，移除 isCustomClient 和 uriPrefix 守卫
+    // 服务端返回 tag 格式 URL (如 .../version/tag/1.4.8)，客户端负责拼接文件名
+    // download.php 根据文件名检测平台，302 跳转到数据库配置的下载地址
+    if (updateUrl.isNotEmpty && !isCardClosed) {
       final isToUpdate = (isWindows || isMacOS) && bind.mainIsInstalled();
+      final newVersion = bind.mainGetNewVersion();
       String btnText = isToUpdate ? 'Update' : 'Download';
       GestureTapCallback onPressed = () async {
-        final Uri url = Uri.parse('https://rustdesk.com/download');
-        await launchUrl(url);
+        // Download 模式：拼接 download/{version}/{filename}，通过 download.php 302 跳转下载
+        String downloadBase = updateUrl.replaceAll('tag', 'download');
+        String version =
+            downloadBase.substring(downloadBase.lastIndexOf('/') + 1);
+        String downloadFile =
+            bind.mainGetCommonSync(key: 'download-file-$version');
+        String fullUrl = downloadFile.startsWith('error:')
+            ? downloadBase // 降级：直接跳到 download/{version} 让服务端兜底
+            : '$downloadBase/$downloadFile';
+        await launchUrl(Uri.parse(fullUrl));
       };
       if (isToUpdate) {
         onPressed = () {
@@ -445,13 +884,13 @@ class _DesktopHomePageState extends State<DesktopHomePage>
       }
       return buildInstallCard(
           "Status",
-          "${translate("new-version-of-{${bind.mainGetAppNameSync()}}-tip")} (${bind.mainGetNewVersion()}).",
+          "${translate("new-version-of-${bind.mainGetAppNameSync()}-tip")} ($newVersion).",
           btnText,
           onPressed,
           closeButton: true,
           help: isToUpdate ? 'Changelog' : null,
           link: isToUpdate
-              ? 'https://github.com/rustdesk/rustdesk/releases/tag/${bind.mainGetNewVersion()}'
+              ? 'https://github.com/vlanl/SecureDesk/releases/tag/$newVersion'
               : null);
     }
     if (systemError.isNotEmpty) {
@@ -528,7 +967,7 @@ class _DesktopHomePageState extends State<DesktopHomePage>
             marginTop: LinuxCards.isEmpty ? 20.0 : 5.0,
             help: 'Help',
             link:
-                'https://rustdesk.com/docs/en/client/linux/#permissions-issue',
+                'https://vlanl.com/docs/en/client/linux/#permissions-issue',
             closeButton: true,
             closeOption: keyShowSelinuxHelpTip,
           ));
@@ -539,13 +978,13 @@ class _DesktopHomePageState extends State<DesktopHomePage>
             "Warning", "wayland_experiment_tip", "", () async {},
             marginTop: LinuxCards.isEmpty ? 20.0 : 5.0,
             help: 'Help',
-            link: 'https://rustdesk.com/docs/en/client/linux/#x11-required'));
+            link: 'https://vlanl.com/docs/en/client/linux/#x11-required'));
       } else if (bind.mainIsLoginWayland()) {
         LinuxCards.add(buildInstallCard("Warning",
             "Login screen using Wayland is not supported", "", () async {},
             marginTop: LinuxCards.isEmpty ? 20.0 : 5.0,
             help: 'Help',
-            link: 'https://rustdesk.com/docs/en/client/linux/#login-screen'));
+            link: 'https://vlanl.com/docs/en/client/linux/#login-screen'));
       }
       if (LinuxCards.isNotEmpty) {
         return Column(
@@ -744,6 +1183,23 @@ class _DesktopHomePageState extends State<DesktopHomePage>
         }
       }
     });
+    // Poll real service connection status for the bottom status bar
+    _statusTimer = periodic_immediate(const Duration(seconds: 1), () async {
+      try {
+        final status = jsonDecode(await bind.mainGetConnectStatus())
+            as Map<String, dynamic>;
+        final statusNum = status['status_num'] as int;
+        if (statusNum == 0) {
+          _localSvcStatus.value = SvcStatus.connecting;
+        } else if (statusNum == -1) {
+          _localSvcStatus.value = SvcStatus.notReady;
+        } else if (statusNum == 1) {
+          _localSvcStatus.value = SvcStatus.ready;
+        } else {
+          _localSvcStatus.value = SvcStatus.notReady;
+        }
+      } catch (_) {}
+    });
     Get.put<RxBool>(svcStopped, tag: 'stop-service');
     rustDeskWinManager.registerActiveWindowListener(onActiveWindowChanged);
 
@@ -849,6 +1305,19 @@ class _DesktopHomePageState extends State<DesktopHomePage>
       });
     }
     WidgetsBinding.instance.addObserver(this);
+
+    // Listen for remote ID focus changes
+    _remoteIdFocusNode.addListener(() {
+      _remoteIdFocused.value = _remoteIdFocusNode.hasFocus;
+    });
+
+    // Load last remote ID
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final lastRemoteId = await bind.mainGetLastRemoteId();
+      if (lastRemoteId.isNotEmpty && _remoteIdController.text.isEmpty) {
+        _remoteIdController.text = lastRemoteId;
+      }
+    });
   }
 
   _updateWindowSize() {
@@ -870,6 +1339,9 @@ class _DesktopHomePageState extends State<DesktopHomePage>
     _uniLinksSubscription?.cancel();
     Get.delete<RxBool>(tag: 'stop-service');
     _updateTimer?.cancel();
+    _statusTimer?.cancel();
+    _remoteIdController.dispose();
+    _remoteIdFocusNode.dispose();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }

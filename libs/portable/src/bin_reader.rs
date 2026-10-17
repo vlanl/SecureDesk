@@ -16,8 +16,8 @@ const PACKAGE_RESOURCE_NAME: &str = "RDPKG";
 
 // 4bytes
 const LENGTH: usize = 4;
-const IDENTIFIER: &[u8] = b"rustdesk";
-const IDENTIFIER_LENGTH: usize = 8;
+const IDENTIFIER: &[u8] = b"securedesk";
+const IDENTIFIER_LENGTH: usize = 10;
 const MD5_LENGTH: usize = 32;
 const BUF_SIZE: usize = 4096;
 

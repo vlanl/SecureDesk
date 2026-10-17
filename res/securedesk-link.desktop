@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=SecureDesk
+NoDisplay=true
+MimeType=x-scheme-handler/securedesk;
+TryExec=securedesk
+Exec=securedesk %u
+Icon=securedesk
+Terminal=false
+Type=Application
+StartupNotify=false
+StartupWMClass=securedesk

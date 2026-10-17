@@ -10,13 +10,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 pub fn start_tray() {
-    if crate::ui_interface::get_builtin_option(keys::OPTION_HIDE_TRAY) == "Y" {
-        #[cfg(not(target_os = "macos"))]
-        {
-            return;
-        }
-    }
-
+    // SecureDesk: 总是创建托盘进程，若配置为隐藏则创建后立即销毁并刷新系统托盘区域。
+    // 这样可以运行期通过 IPC 动态显示/隐藏托盘图标（见 Data::HideTray）。
     #[cfg(target_os = "linux")]
     crate::server::check_zombie();
 
@@ -129,10 +124,21 @@ fn make_tray() -> hbb_common::ResultType<()> {
         }
     };
 
+    // SecureDesk: 托盘图标 IPC 监听器（接收隐藏/显示指令并转发到事件循环）
     #[cfg(windows)]
-    std::thread::spawn(move || {
-        start_query_session_count(ipc_sender.clone());
-    });
+    {
+        let ipc_sender_for_tray = ipc_sender.clone();
+        std::thread::spawn(move || {
+            start_ipc_listener(ipc_sender_for_tray);
+        });
+    }
+    #[cfg(windows)]
+    {
+        let ipc_sender_for_count = ipc_sender.clone();
+        std::thread::spawn(move || {
+            start_query_session_count(ipc_sender_for_count);
+        });
+    }
     #[cfg(windows)]
     let mut last_click = std::time::Instant::now();
     #[cfg(target_os = "macos")]
@@ -146,11 +152,10 @@ fn make_tray() -> hbb_common::ResultType<()> {
         );
 
         if let tao::event::Event::NewEvents(tao::event::StartCause::Init) = event {
-            // for fixing https://github.com/rustdesk/rustdesk/discussions/10210#discussioncomment-14600745
-            // so we start tray, but not to show it
-            if crate::ui_interface::get_builtin_option(keys::OPTION_HIDE_TRAY) == "Y" {
-                return;
-            }
+            // SecureDesk: 先按配置决定是否隐藏；托盘仍然创建，稍后按需销毁，
+            // 以便运行期可以通过 IPC 再次显示出来。
+            #[cfg(windows)]
+            let hide_tray = crate::ui_interface::get_option(keys::OPTION_HIDE_TRAY) == "Y";
             // We create the icon once the event loop is actually running
             // to prevent issues like https://github.com/tauri-apps/tray-icon/issues/90
             let mut builder = TrayIconBuilder::new()
@@ -184,6 +189,13 @@ fn make_tray() -> hbb_common::ResultType<()> {
 
                 let rl = CFRunLoopGetMain();
                 CFRunLoopWakeUp(rl);
+            }
+
+            // SecureDesk: 配置为隐藏时，创建后立即销毁图标并刷新系统托盘区域
+            #[cfg(windows)]
+            if hide_tray {
+                *_tray_icon.lock().unwrap() = None;
+                refresh_tray_area();
             }
         }
 
@@ -256,6 +268,33 @@ fn make_tray() -> hbb_common::ResultType<()> {
                         .as_mut()
                         .map(|t| t.set_tooltip(Some(tooltip(count))));
                 }
+                // SecureDesk: 动态隐藏/显示托盘图标
+                Data::HideTray(hide) => {
+                    let mut tray_guard = _tray_icon.lock().unwrap();
+                    if hide {
+                        // 销毁图标对象以隐藏
+                        *tray_guard = None;
+                        refresh_tray_area();
+                    } else if tray_guard.is_none() {
+                        // 重建图标对象以显示
+                        let mut builder = TrayIconBuilder::new()
+                            .with_id(crate::get_app_name().to_lowercase())
+                            .with_menu(Box::new(tray_menu.clone()))
+                            .with_tooltip(tooltip(0))
+                            .with_icon(icon.clone())
+                            .with_menu_on_left_click(false);
+                        #[cfg(target_os = "macos")]
+                        {
+                            builder = builder.with_icon_as_template(true);
+                        }
+                        match builder.build() {
+                            Ok(tray) => *tray_guard = Some(tray),
+                            Err(err) => {
+                                log::error!("Failed to create tray icon: {}", err);
+                            }
+                        }
+                    }
+                }
                 _ => {}
             }
         }
@@ -296,6 +335,95 @@ async fn start_query_session_count(sender: std::sync::mpsc::Sender<Data>) {
         }
         hbb_common::sleep(1.).await;
     }
+}
+
+/// 强制刷新 Windows 系统托盘区域，避免图标隐藏后出现幽灵图标。
+/// 通过向托盘窗口发送鼠标移动消息触发 Windows 重绘。
+#[cfg(windows)]
+fn refresh_tray_area() {
+    use std::mem;
+    use winapi::shared::windef::RECT;
+    use winapi::um::winuser::{
+        FindWindowExW, FindWindowW, GetClientRect, SendMessageW, WM_MOUSEMOVE,
+    };
+
+    unsafe {
+        // 查找任务栏窗口
+        let taskbar_hwnd = FindWindowW(encode_wide("Shell_TrayWnd").as_ptr(), std::ptr::null());
+        if taskbar_hwnd.is_null() {
+            log::warn!("Could not find taskbar window");
+            return;
+        }
+
+        // 查找托盘通知区域
+        let tray_hwnd = FindWindowExW(
+            taskbar_hwnd,
+            std::ptr::null_mut(),
+            encode_wide("TrayNotifyWnd").as_ptr(),
+            std::ptr::null(),
+        );
+        if tray_hwnd.is_null() {
+            log::warn!("Could not find tray notification window");
+            return;
+        }
+
+        // 获取托盘区域尺寸
+        let mut rect: RECT = mem::zeroed();
+        if GetClientRect(tray_hwnd, &mut rect) == 0 {
+            log::warn!("Could not get tray rect");
+            return;
+        }
+
+        // 遍历托盘区域发送鼠标移动消息，每 5 像素一个采样点
+        let mut x = rect.left;
+        while x < rect.right {
+            let mut y = rect.top;
+            while y < rect.bottom {
+                let lparam = ((y as u32) << 16) | (x as u32);
+                SendMessageW(tray_hwnd, WM_MOUSEMOVE, 0, lparam as isize);
+                y += 5;
+            }
+            x += 5;
+        }
+
+        log::info!("Tray area refreshed");
+    }
+}
+
+/// 将 UTF-8 字符串转换为 Windows API 所需的 UTF-16 宽字符，并添加 null 终止符。
+#[cfg(windows)]
+fn encode_wide(s: &str) -> Vec<u16> {
+    use std::ffi::OsStr;
+    use std::os::windows::ffi::OsStrExt;
+    OsStr::new(s).encode_wide().chain(Some(0)).collect()
+}
+
+/// 启动 IPC 服务器接收托盘控制消息，并转发到事件循环。
+#[cfg(windows)]
+fn start_ipc_listener(sender: std::sync::mpsc::Sender<Data>) {
+    use hbb_common::futures::StreamExt;
+
+    tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(async move {
+            if let Ok(mut incoming) = crate::ipc::new_listener("hide-tray").await {
+                while let Some(Ok(stream)) = incoming.next().await {
+                    let sender_clone = sender.clone();
+                    tokio::spawn(async move {
+                        let mut stream = crate::ipc::Connection::new(stream);
+                        loop {
+                            match stream.next().await {
+                                Ok(Some(Data::HideTray(hide))) => {
+                                    sender_clone.send(Data::HideTray(hide)).ok();
+                                }
+                                Ok(None) | Err(_) => break,
+                                _ => {}
+                            }
+                        }
+                    });
+                }
+            }
+        });
 }
 
 fn load_icon_from_asset() -> Option<image::DynamicImage> {

@@ -386,6 +386,9 @@ pub enum Data {
     Theme(String),
     Language(String),
     Empty,
+    /// SecureDesk: 动态隐藏/显示系统托盘图标 (true=隐藏, false=显示)
+    #[cfg(windows)]
+    HideTray(bool),
     Disconnected,
     DataPortableService(DataPortableService),
     #[cfg(feature = "flutter")]
@@ -1769,12 +1772,13 @@ async fn set_permanent_password_with_ack_async(v: String) -> ResultType<bool> {
     Ok(false)
 }
 
-#[cfg(feature = "flutter")]
+// SecureDesk: 去掉 flutter feature 门槛，Sciter 框架的 PIN 设置锁也需要调用
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn set_unlock_pin(v: String, translate: bool) -> ResultType<()> {
     let v = v.trim().to_owned();
     let min_len = 4;
-    let max_len = crate::ui_interface::max_encrypt_len();
+    // ui_interface::max_encrypt_len() 仅在 flutter feature 下存在，这里直接使用常量
+    let max_len = hbb_common::config::ENCRYPT_MAX_LEN;
     let len = v.chars().count();
     if !v.is_empty() {
         if len < min_len {
@@ -1796,7 +1800,7 @@ pub fn set_unlock_pin(v: String, translate: bool) -> ResultType<()> {
     set_config("unlock-pin", v)
 }
 
-#[cfg(feature = "flutter")]
+// SecureDesk: 去掉 flutter feature 门槛，Sciter 框架的 PIN 设置锁也需要调用
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn get_unlock_pin() -> String {
     if let Ok(Some(v)) = get_config("unlock-pin") {

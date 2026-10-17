@@ -84,7 +84,7 @@ class _ConnectionPageState extends State<ConnectionPage> {
       slivers: [
         SliverList(
             delegate: SliverChildListDelegate([
-          if (!bind.isCustomClient() && !isIOS)
+          if (!isIOS)
             Obx(() => _buildUpdateUI(stateGlobal.updateUrl.value)),
           _buildRemoteIDTextField(),
         ])),
@@ -124,16 +124,17 @@ class _ConnectionPageState extends State<ConnectionPage> {
         ? const SizedBox(height: 0)
         : InkWell(
             onTap: () async {
-              final url = 'https://rustdesk.com/download';
-              // https://pub.dev/packages/url_launcher#configuration
-              // https://developer.android.com/training/package-visibility/use-cases#open-urls-custom-tabs
-              //
-              // `await launchUrl(Uri.parse(url))` can also run if skip
-              // 1. The following check
-              // 2. `<action android:name="android.support.customtabs.action.CustomTabsService" />` in AndroidManifest.xml
-              //
-              // But it is better to add the check.
-              await launchUrl(Uri.parse(url));
+              // SecureDesk: use server-returned URL dynamically
+              String downloadBase =
+                  updateUrl.replaceAll('tag', 'download');
+              String version = downloadBase
+                  .substring(downloadBase.lastIndexOf('/') + 1);
+              String downloadFile = bind.mainGetCommonSync(
+                  key: 'download-file-$version');
+              String fullUrl = downloadFile.startsWith('error:')
+                  ? downloadBase
+                  : '$downloadBase/$downloadFile';
+              await launchUrl(Uri.parse(fullUrl));
             },
             child: Container(
                 alignment: AlignmentDirectional.center,

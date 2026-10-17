@@ -85,7 +85,21 @@ fn install_android_deps() {
     println!("cargo:rustc-link-lib=OpenSLES");
 }
 
+/// 若环境变量（Repository secrets）未提供，则写入 SecureDesk 默认值。
+/// 必须在 hbb_common::gen_version() 之前调用。
+fn set_default_env(key: &str, val: &str) {
+    match std::env::var_os(key) {
+        Some(v) if !v.is_empty() => {}
+        _ => std::env::set_var(key, val),
+    }
+}
+
 fn main() {
+    // SecureDesk: 编译期品牌与服务器默认值注入（Repository secrets 优先）
+    set_default_env("APP_NAME", "SecureDesk");
+    set_default_env("RENDEZVOUS_SERVER", "rs-ny.vlanl.com");
+    set_default_env("RELAY_SERVER", "rs-ny.vlanl.com");
+    set_default_env("API_SERVER", "rs-ny.vlanl.com");
     hbb_common::gen_version();
     install_android_deps();
     #[cfg(all(windows, feature = "inline"))]

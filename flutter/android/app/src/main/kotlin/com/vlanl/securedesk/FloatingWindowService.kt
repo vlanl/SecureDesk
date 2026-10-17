@@ -1,4 +1,4 @@
-package com.carriez.flutter_hbb
+package com.vlanl.securedesk
 
 import android.annotation.SuppressLint
 import android.app.PendingIntent

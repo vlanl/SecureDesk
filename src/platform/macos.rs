@@ -900,7 +900,7 @@ pub fn update_me() -> ResultType<()> {
     );
 
     let cmd = std::env::current_exe()?;
-    // RustDesk.app/Contents/MacOS/RustDesk
+    // SecureDesk.app/Contents/MacOS/securedesk
     let app_dir = cmd
         .parent()
         .and_then(|p| p.parent())

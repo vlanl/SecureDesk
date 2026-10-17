@@ -249,16 +249,16 @@ class MyTheme {
   MyTheme._();
 
   static const Color grayBg = Color(0xFFEFEFF2);
-  static const Color accent = Color(0xFF0071FF);
-  static const Color accent50 = Color(0x770071FF);
-  static const Color accent80 = Color(0xAA0071FF);
+  static const Color accent = Color(0xFF2C8CFF);
+  static const Color accent50 = Color(0x772C8CFF);
+  static const Color accent80 = Color(0xAA2C8CFF);
   static const Color canvasColor = Color(0xFF212121);
   static const Color border = Color(0xFFCCCCCC);
   static const Color idColor = Color(0xFF00B6F0);
   static const Color darkGray = Color.fromARGB(255, 148, 148, 148);
   static const Color cmIdColor = Color(0xFF21790B);
   static const Color dark = Colors.black87;
-  static const Color button = Color(0xFF2C8CFF);
+  static const Color button = Color(0xFF1976D2);
   static const Color hoverBorder = Color(0xFF999999);
 
   // ListTile
@@ -3738,7 +3738,7 @@ Widget loadPowered(BuildContext context) {
     cursor: SystemMouseCursors.click,
     child: GestureDetector(
       onTap: () {
-        launchUrl(Uri.parse('https://rustdesk.com'));
+        launchUrl(Uri.parse('https://vlanl.com'));
       },
       child: Opacity(
           opacity: 0.5,
@@ -3808,11 +3808,13 @@ class _LogoState extends State<_Logo> {
             },
           );
           return Container(
-            constraints: BoxConstraints(maxWidth: 300, maxHeight: 60),
+            constraints: BoxConstraints(maxWidth: 300, maxHeight: 36),
             child: image,
-          ).marginOnly(left: 12, right: 12, top: 12);
+          ).marginOnly(left: 12, right: 12, top: 6);
         }
-        return const Offstage();
+        // Return SizedBox.shrink() to avoid occupying space
+        // when the logo is not loaded (prevents top blank area).
+        return SizedBox.shrink();
       },
     );
   }
@@ -3885,12 +3887,19 @@ Widget buildPresetPasswordWarningMobile() {
   }
 }
 
+// Cache the future to avoid recreating it on every rebuild,
+// which would cause the FutureBuilder to flash a loading spinner.
+Future<bool>? _presetPasswordFuture;
+
 Widget buildPresetPasswordWarning() {
+  _presetPasswordFuture ??= bind.isPresetPassword();
   return FutureBuilder<bool>(
-    future: bind.isPresetPassword(),
+    future: _presetPasswordFuture,
     builder: (BuildContext context, AsyncSnapshot<bool> snapshot) {
       if (snapshot.connectionState == ConnectionState.waiting) {
-        return CircularProgressIndicator(); // Show a loading spinner while waiting for the Future to complete
+        // Use SizedBox.shrink() instead of CircularProgressIndicator()
+        // to avoid height changes that cause left panel flickering.
+        return SizedBox.shrink();
       } else if (snapshot.hasError) {
         return Text(
             'Error: ${snapshot.error}'); // Show an error message if the Future completed with an error
@@ -3993,7 +4002,7 @@ get defaultOptionAccessMode => isCustomClient ? 'custom' : '';
 get defaultOptionApproveMode => isCustomClient ? 'password-click' : '';
 
 bool whitelistNotEmpty() {
-  // https://rustdesk.com/docs/en/self-host/client-configuration/advanced-settings/#whitelist
+  // https://vlanl.com/docs/en/self-host/client-configuration/advanced-settings/#whitelist
   final v = bind.mainGetOptionSync(key: kOptionWhitelist);
   return v != '' && v != ',';
 }
@@ -4066,19 +4075,18 @@ void earlyAssert() {
 }
 
 void checkUpdate() {
+  // SecureDesk: 允许自定义客户端检查更新（上游用 isCustomClient() 拦截）
   if (!isWeb) {
-    if (!bind.isCustomClient()) {
-      platformFFI.registerEventHandler(
-          kCheckSoftwareUpdateFinish, kCheckSoftwareUpdateFinish,
-          (Map<String, dynamic> evt) async {
-        if (evt['url'] is String) {
-          stateGlobal.updateUrl.value = evt['url'];
-        }
-      });
-      Timer(const Duration(seconds: 1), () async {
-        bind.mainGetSoftwareUpdateUrl();
-      });
-    }
+    platformFFI.registerEventHandler(
+        kCheckSoftwareUpdateFinish, kCheckSoftwareUpdateFinish,
+        (Map<String, dynamic> evt) async {
+      if (evt['url'] is String) {
+        stateGlobal.updateUrl.value = evt['url'];
+      }
+    });
+    Timer(const Duration(seconds: 1), () async {
+      bind.mainGetSoftwareUpdateUrl();
+    });
   }
 }
 

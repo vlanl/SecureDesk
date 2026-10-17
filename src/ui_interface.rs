@@ -166,10 +166,14 @@ pub fn get_option<T: AsRef<str>>(key: T) -> String {
     {
         let map = OPTIONS.lock().unwrap();
         if let Some(v) = map.get(key.as_ref()) {
-            v.to_owned()
-        } else {
-            "".to_owned()
+            if !v.is_empty() {
+                return v.to_owned();
+            }
         }
+        // SecureDesk: 回退到 Config::get_option 取默认值。
+        // IPC 同步过来的 OPTIONS 会丢掉被 purify_options 剔除的键
+        //（值等于 DEFAULT_SETTINGS 的项，例如 hide-tray）。
+        Config::get_option(key.as_ref())
     }
     #[cfg(any(target_os = "android", target_os = "ios"))]
     {
@@ -408,6 +412,26 @@ pub fn get_sound_inputs() -> Vec<String> {
     a
 }
 
+/// SecureDesk: 通知托盘进程显示/隐藏托盘图标。
+/// Windows 下托盘运行在独立的 `--tray` 进程中，通过 IPC 通知。
+#[cfg(windows)]
+pub fn send_to_tray(hide: bool) {
+    // 直接写入配置，保证托盘进程启动时能读到最新值
+    Config::set_option(
+        keys::OPTION_HIDE_TRAY.to_string(),
+        if hide { "Y".to_string() } else { "N".to_string() },
+    );
+    // 通过 IPC 通知正在运行的托盘进程
+    std::thread::spawn(move || {
+        let rt = hbb_common::tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async move {
+            if let Ok(mut c) = ipc::connect(1000, "hide-tray").await {
+                c.send(&ipc::Data::HideTray(hide)).await.ok();
+            }
+        });
+    });
+}
+
 #[inline]
 pub fn set_options(m: HashMap<String, String>) {
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -447,6 +471,13 @@ pub fn set_option(key: String, value: String) {
     } else if &key == "audio-input" {
         #[cfg(not(target_os = "ios"))]
         crate::audio_service::restart();
+    } else if &key == keys::OPTION_HIDE_TRAY {
+        // SecureDesk: 设置 hide-tray 时，动态隐藏或显示托盘图标
+        #[cfg(windows)]
+        {
+            let hide = value == "Y";
+            send_to_tray(hide);
+        }
     }
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {

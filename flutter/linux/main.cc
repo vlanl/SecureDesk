@@ -5,13 +5,13 @@
 #include <unistd.h>
 #include "my_application.h"
 
-#define RUSTDESK_LIB_PATH "librustdesk.so"
+#define RUSTDESK_LIB_PATH "libsecuredesk.so"
 typedef bool (*RustDeskCoreMain)();
 bool gIsConnectionManager = false;
 
 void print_help_install_pkg(const char* so);
 
-// The bundle keeps the core library at lib/librustdesk.so next to the
+// The bundle keeps the core library at lib/libsecuredesk.so next to the
 // executable. Resolve that path explicitly instead of relying on the
 // runner's RPATH, which repackaged installs may strip.
 // https://github.com/rustdesk/rustdesk/discussions/14407
@@ -42,7 +42,7 @@ bool flutter_rustdesk_core_main() {
       librustdesk = dlopen(RUSTDESK_LIB_PATH, RTLD_LAZY);
    }
    if (!librustdesk) {
-      fprintf(stderr,"Failed to load \"librustdesk.so\"\n");
+      fprintf(stderr,"Failed to load \"libsecuredesk.so\"\n");
       char* error;
       if ((error = dlerror()) != nullptr) {
         fprintf(stderr, "%s\n", error);
