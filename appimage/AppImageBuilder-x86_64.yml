@@ -7,19 +7,19 @@ script:
  - mkdir ./AppDir
  - mv ./usr ./AppDir/usr
  # 32x32 icon
- - for i in {32,64,128}; do mkdir -p ./AppDir/usr/share/icons/hicolor/$i\x$i/apps/; cp ../res/$i\x$i.png ./AppDir/usr/share/icons/hicolor/$i\x$i/apps/rustdesk.png; done
- - mkdir -p ./AppDir/usr/share/icons/hicolor/scalable/apps/; cp ../res/scalable.svg ./AppDir/usr/share/icons/hicolor/scalable/apps/rustdesk.svg
+ - for i in {32,64,128}; do mkdir -p ./AppDir/usr/share/icons/hicolor/$i\x$i/apps/; cp ../res/$i\x$i.png ./AppDir/usr/share/icons/hicolor/$i\x$i/apps/securedesk.png; done
+ - mkdir -p ./AppDir/usr/share/icons/hicolor/scalable/apps/; cp ../res/scalable.svg ./AppDir/usr/share/icons/hicolor/scalable/apps/securedesk.svg
  # desktop file
- # - sed -i "s/Icon=\/usr\/share\/rustdesk\/files\/rustdesk.png/Icon=rustdesk/g" ./AppDir/usr/share/applications/rustdesk.desktop
+ # - sed -i "s/Icon=\/usr\/share\/rustdesk\/files\/rustdesk.png/Icon=securedesk/g" ./AppDir/usr/share/applications/securedesk.desktop
  - rm -rf ./AppDir/usr/share/applications
 AppDir:
   path: ./AppDir
   app_info:
-    id: rustdesk
-    name: rustdesk
-    icon: rustdesk
+    id: securedesk
+    name: securedesk
+    icon: securedesk
     version: 1.5.0
-    exec: usr/share/rustdesk/rustdesk
+    exec: usr/share/rustdesk/securedesk
     exec_args: $@
   apt:
     arch:
